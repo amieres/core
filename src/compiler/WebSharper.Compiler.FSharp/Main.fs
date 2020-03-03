@@ -42,7 +42,9 @@ type WebSharperFSharpCompiler(logger, ?checker) =
     member val UseVerifier = true with get, set
     member val WarnSettings = WarnSettings.Default with get, set
 
-    member this.Compile (prevMeta : System.Threading.Tasks.Task<option<M.Info>>, argv, config: WsConfig, assemblyName) = 
+    member this.Compile  (prevMeta : System.Threading.Tasks.Task<option<M.Info>>, argv, config: WsConfig, assemblyName) = 
+           this.CompileA |> Async.RunSynchronously
+    member this.CompileA (prevMeta : System.Threading.Tasks.Task<option<M.Info>>, argv, config: WsConfig, assemblyName) = async {
         let path = config.ProjectFile
         
         let projectOptionsOpt =
@@ -52,13 +54,12 @@ type WebSharperFSharpCompiler(logger, ?checker) =
                 None
 
         match projectOptionsOpt with
-        | None -> None
+        | None -> return None
         | Some projectOptions ->
 
-        let checkProjectResults = 
+        let! checkProjectResults = 
             projectOptions
             |> checker.ParseAndCheckProject 
-            |> Async.RunSynchronously
 
         TimedStage "Checking project"
 
@@ -71,7 +72,7 @@ type WebSharperFSharpCompiler(logger, ?checker) =
             |> String.concat "\r\n"
             |> failwith
         |> function
-        | None -> None
+        | None -> return None
         | Some refMeta ->
 
         TimedStage "Waiting on merged metadata"
@@ -79,7 +80,7 @@ type WebSharperFSharpCompiler(logger, ?checker) =
         if checkProjectResults.Errors |> Array.exists (fun e -> e.Severity = FSharpErrorSeverity.Error && not (this.WarnSettings.NoWarn.Contains e.ErrorNumber)) then
             if assemblyName = "WebSharper.Main" || config.ProjectType = Some BundleOnly then
                 PrintFSharpErrors this.WarnSettings checkProjectResults.Errors
-            None
+            return None
         else
         
         let comp = 
@@ -96,7 +97,8 @@ type WebSharperFSharpCompiler(logger, ?checker) =
             
         TimedStage "WebSharper translation"
 
-        Some comp
+        return Some comp
+    }
 
     static member Compile (prevMeta, assemblyName, checkProjectResults: FSharpCheckProjectResults, ?useGraphs, ?config: WsConfig) =
         let useGraphs = defaultArg useGraphs true
